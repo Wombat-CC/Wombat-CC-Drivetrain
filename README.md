@@ -1,16 +1,27 @@
-# Wombat-CC Drivetrain Library
+# Wombat-CC Drivetrain
 
-Drivetrain is a C++ helper for a 4-motor holonomic/mecanum-style base on KIPR Wombat.
+Wombat-CC Drivetrain is a C++ controller for a 4-motor holonomic or mecanum base on KIPR Wombat.
 
-It provides:
+This library provides grouped movement APIs for:
 
-- Encoder-based drive, strafe, rotate, and diagonal movement
-- Line tracking and line acquisition helpers
-- Optional debug logging
+- Encoder-based drive and strafe movement
+- Line-tracking drive and strafe movement
+- Rotate and diagonal primitives
+- Line acquisition and line alignment helpers
+- Runtime debug logging
 
-## Add To A Project
+## Contents
 
-Use this dependency key in your consumer `build.zig.zon`:
+- Setup and include
+- Motor and sensor mapping
+- Initialization flow
+- Two-sensor and four-sensor examples
+- Behavior notes and tuning
+- Full API reference in API.md
+
+## Setup
+
+Add the dependency to your consumer build.zig.zon.
 
 ```zig
 .dependencies = .{
@@ -18,46 +29,39 @@ Use this dependency key in your consumer `build.zig.zon`:
 };
 ```
 
-Then include the header:
+Include the header in C++ code.
 
 ```cpp
 #include <Wombat-CC/Drivetrain.hpp>
 ```
 
-## Motor Layout And Constructor
+## Motor And Sensor Mapping
 
-Constructor:
+Constructor parameters map to motors in this order:
 
-```cpp
-Drivetrain(
-    int FL, int FR, int RL, int RR
-)
-```
+- FL: front-left motor
+- FR: front-right motor
+- RL: rear-left motor
+- RR: rear-right motor
 
-Then configure line-tracking IR ports separately:
+Line sensors are configured separately after construction.
 
-```cpp
-drivetrain.ConfigureLineTrackingSensors(int FL_IR_PORT, int FR_IR_PORT);
-// OR
-drivetrain.ConfigureLineTrackingSensors(
-    int FL_IR_PORT, int FR_IR_PORT, int RR_IR_PORT, int RL_IR_PORT);
-```
+- FL_IR: front-left line sensor
+- FR_IR: front-right line sensor
+- RR_IR: rear-right line sensor
+- RL_IR: rear-left line sensor
 
-Port meaning:
+## Required Initialization Order
 
-- `FL`: front-left motor
-- `FR`: front-right motor
-- `RL`: rear-left motor
-- `RR`: rear-right motor
+1. Construct drivetrain with motor ports.
+2. Optionally set debug mode.
+3. Set motor performance multipliers.
+4. Configure line sensor ports, choosing either 2-sensor or 4-sensor mode.
+5. Set line thresholds using the matching 2-sensor or 4-sensor overload.
 
-Line sensor meaning:
+Line-tracking calls are guarded and will print a warning and return if configuration is incomplete or mismatched.
 
-- `FL_IR_PORT`: front-left line sensor analog port
-- `FR_IR_PORT`: front-right line sensor analog port
-- `RR_IR_PORT`: rear-right line sensor analog port
-- `RL_IR_PORT`: rear-left line sensor analog port
-
-## Quick Start
+## Quick Start: Two Sensors
 
 ```cpp
 #include <Wombat-CC/Drivetrain.hpp>
@@ -67,116 +71,87 @@ int main()
     Drivetrain drivetrain(0, 1, 2, 3);
 
     drivetrain.SetDebugEnabled(true);
-
     drivetrain.SetPerformance(1.0, 1.0, 1.0, 1.0);
+
     drivetrain.ConfigureLineTrackingSensors(0, 1);
     drivetrain.SetLineTrackingThresholds(200, 200, 3600, 3600);
 
     drivetrain.DriveByEncoder.Forward(300, 800);
-    drivetrain.StrafeByEncoder.Right(300, 800);
-    drivetrain.Rotate.Right(200, 700);
     drivetrain.DriveLineTracking.Forward(1000, 700);
+    drivetrain.StrafeLineTracking.ToLineRight(600);
+
+    return 0;
+}
+```
+
+## Quick Start: Four Sensors
+
+```cpp
+#include <Wombat-CC/Drivetrain.hpp>
+
+int main()
+{
+    Drivetrain drivetrain(0, 1, 2, 3);
+
+    drivetrain.SetDebugEnabled(true);
+    drivetrain.SetPerformance(1.0, 1.0, 1.0, 1.0);
+
+    drivetrain.ConfigureLineTrackingSensors(0, 1, 2, 3);
+    drivetrain.SetLineTrackingThresholds(
+        200, 200, 200, 200,
+        3600, 3600, 3600, 3600);
+
+    drivetrain.DriveLineTracking.Forward(1200, 700);
+    drivetrain.StrafeLineTracking.LeftOnToLine(500);
     drivetrain.Line.Square(500);
 
     return 0;
 }
 ```
 
-## Recommended Initialization Order
-
-1. Construct drivetrain with motor ports.
-2. Call `SetPerformance(...)` to tune per-motor multipliers.
-3. Call `ConfigureLineTrackingSensors(...)`.
-4. Call `SetLineTrackingThresholds(...)` before any line-based movement.
-
-## API Overview
-
-Movement is grouped by domain for discoverability and future expansion.
-
-### Configuration
-
-- `void SetPerformance(double FLP, double FRP, double RLP, double RRP)`
-- `void ConfigureLineTrackingSensors(int FL_IR_PORT, int FR_IR_PORT)`
-- `void ConfigureLineTrackingSensors(int FL_IR_PORT, int FR_IR_PORT, int RR_IR_PORT, int RL_IR_PORT)`
-- `void SetLineTrackingThresholds(int FL_white, int FR_white, int FL_black, int FR_black)`
-- `void SetLineTrackingThresholds(int FL_white, int FR_white, int RR_white, int RL_white, int FL_black, int FR_black, int RR_black, int RL_black)`
-- `void SetDebugEnabled(bool enabled)`
-- `bool IsDebugEnabled() const`
-- `bool IsLineTrackingConfigured() const`
-
-### DriveByEncoder Group
-
-- `drivetrain.DriveByEncoder.Forward(int ticks, int speed)`
-- `drivetrain.DriveByEncoder.Backward(int ticks, int speed)`
-
-### DriveLineTracking Group
-
-- `drivetrain.DriveLineTracking.Forward(int ticks, int speed)`
-- `drivetrain.DriveLineTracking.Backward(int ticks, int speed)`
-- `drivetrain.DriveLineTracking.ForwardToLine(int speed)`
-- `drivetrain.DriveLineTracking.BackwardToLine(int speed)`
-
-### StrafeByEncoder Group
-
-- `drivetrain.StrafeByEncoder.Left(int ticks, int speed)`
-- `drivetrain.StrafeByEncoder.Right(int ticks, int speed)`
-
-### StrafeLineTracking Group
-
-- `drivetrain.StrafeLineTracking.Left(int ticks, int speed)`
-- `drivetrain.StrafeLineTracking.Right(int ticks, int speed)`
-- `drivetrain.StrafeLineTracking.LeftToLine(int speed)`
-- `drivetrain.StrafeLineTracking.RightToLine(int speed)`
-- `drivetrain.StrafeLineTracking.LeftOnToLine(int speed)`
-- `drivetrain.StrafeLineTracking.RightOnToLine(int speed)`
-
-### Rotate Group
-
-- `drivetrain.Rotate.Left(int ticks, int speed)`
-- `drivetrain.Rotate.Right(int ticks, int speed)`
-
-### Diagonal Group
-
-- `drivetrain.Diagonal.ForwardLeft(int ticks, int speed)`
-- `drivetrain.Diagonal.ForwardRight(int ticks, int speed)`
-- `drivetrain.Diagonal.BackwardLeft(int ticks, int speed)`
-- `drivetrain.Diagonal.BackwardRight(int ticks, int speed)`
-
-### Line Group
-
-- `drivetrain.Line.Square(int speed)`
-- `drivetrain.Line.Center(int speed)`
-
-### Legacy Note
-
-The old flat movement API has been removed in favor of the grouped API above.
-
 ## Direction Conventions
 
-- Drive: positive speed is forward.
-- Strafe: positive speed is right.
-- Rotate: positive speed is clockwise.
-- Diagonal wrappers handle sign combinations internally.
+- Drive: positive speed means forward.
+- Strafe: positive speed means right.
+- Rotate: positive speed means clockwise.
+- Diagonal wrappers encode sign combinations internally.
+
+## Four-Sensor Tracking Behavior
+
+When four sensors are configured:
+
+- Drive line tracking uses FL, FR, RL, and RR directly for per-wheel correction.
+- Strafe line tracking uses FL, FR, RL, and RR directly for per-wheel correction.
+- Left and right side checks are derived from corner sensors:
+left = FL or RL, right = FR or RR.
+- LeftOnToLine and RightOnToLine wait until all configured sensors have observed the line.
+
+When only two sensors are configured, existing two-sensor behavior is preserved.
+
+## Tuning Notes
+
+- Thresholds are midpoint values between white and black calibration readings.
+- Per-motor performance multipliers should be tuned before fine line-tracking tuning.
+- If the robot oscillates, reduce speed and consider lowering correction aggressiveness in code.
+- If one corner drifts, calibrate that sensor again and recheck motor multiplier values.
 
 ## Debug Logging
 
-Two options are supported:
+Enable debug logs either in code or by environment variable.
 
-- Runtime toggle in code with `SetDebugEnabled(true)`
-- Environment variable before program start: `WOMBAT_CC_DEBUG=1`
+- SetDebugEnabled(true)
+- WOMBAT_CC_DEBUG=1
 
-Truthy values currently recognized:
+Truthy values for WOMBAT_CC_DEBUG are:
 
-- `1`
-- `true`
-- `TRUE`
-- `on`
-- `ON`
+- 1
+- true
+- TRUE
+- on
+- ON
 
-## Practical Notes
+## API Reference
 
-- Line threshold values are computed internally as midpoint between white and black readings.
-- Line-based movement methods require `ConfigureLineTrackingSensors(...)` and `SetLineTrackingThresholds(...)`; otherwise they print a warning and return.
-- Performance multipliers help compensate for uneven motors or drivetrain friction.
-- Some encoder-based primitives use one reference encoder for completion checks, so per-motor performance tuning is important for straightness.
-- Backward line tracking is available, but forward line tracking generally gives more stable results.
+Use API.md for full method-by-method reference:
+
+- API.md

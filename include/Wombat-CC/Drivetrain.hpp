@@ -169,6 +169,18 @@ public:
         void RightToLine(int speed);
 
         /**
+         * @brief Alias for LeftToLine for explicit naming symmetry.
+         * @param speed Requested speed magnitude.
+         */
+        void ToLineLeft(int speed);
+
+        /**
+         * @brief Alias for RightToLine for explicit naming symmetry.
+         * @param speed Requested speed magnitude.
+         */
+        void ToLineRight(int speed);
+
+        /**
          * @brief Strafe left until both sensors have seen line.
          * @param speed Requested speed magnitude.
          */
@@ -580,6 +592,16 @@ private:
      */
     void ReadLineSensorStateBySide(bool &on_line_left,
                                    bool &on_line_right) const;
+
+    /**
+     * @brief Read line state for each corner sensor.
+     * @param on_line_fl Output front-left on-line state.
+     * @param on_line_fr Output front-right on-line state.
+     * @param on_line_rr Output rear-right on-line state.
+     * @param on_line_rl Output rear-left on-line state.
+     */
+    void ReadLineSensorStateAll(bool &on_line_fl, bool &on_line_fr,
+                                bool &on_line_rr, bool &on_line_rl) const;
 
     /**
      * @brief Apply the same signed speed to all motors using multipliers.

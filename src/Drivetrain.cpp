@@ -117,6 +117,16 @@ void Drivetrain::StrafeLineTrackingController::RightToLine(int speed)
     Parent.MoveStrafeUntilLine(speed);
 }
 
+void Drivetrain::StrafeLineTrackingController::ToLineLeft(int speed)
+{
+    LeftToLine(speed);
+}
+
+void Drivetrain::StrafeLineTrackingController::ToLineRight(int speed)
+{
+    RightToLine(speed);
+}
+
 void Drivetrain::StrafeLineTrackingController::LeftOnToLine(int speed)
 {
     Parent.MoveStrafeUntilBothSensorsSeeLine(-speed);
@@ -349,6 +359,7 @@ void Drivetrain::SetPerformance(double front_left_performance,
                                 double rear_left_performance,
                                 double rear_right_performance)
 {
+    // Store user multipliers and refresh the packed array used by hot loops.
     FrontLeftPerformance = front_left_performance;
     FrontRightPerformance = front_right_performance;
     RearLeftPerformance = rear_left_performance;
@@ -370,6 +381,7 @@ void Drivetrain::MoveDriveTicks(int ticks, int speed)
 {
     LogCommand("MoveDriveTicks", ticks, speed);
 
+    // Encoder-based straight movement with all motors driven at scaled speed.
     ResetMotorPositionCounters();
     const int target_ticks = std::abs(ticks);
     const int drive_speed = -speed;
@@ -388,6 +400,7 @@ void Drivetrain::MoveDriveTicksLineTracking(int ticks, int speed)
 
     LogCommand("MoveDriveTicksLineTracking", ticks, speed);
 
+    // Drive while continuously trimming wheel speeds from live line sensor state.
     ResetMotorPositionCounters();
     const int target_ticks = std::abs(ticks);
     const int drive_speed = -speed;
@@ -396,10 +409,30 @@ void Drivetrain::MoveDriveTicksLineTracking(int ticks, int speed)
     {
         bool on_line_fl = false;
         bool on_line_fr = false;
-        ReadLineSensorState(on_line_fl, on_line_fr);
+        bool on_line_rr = false;
+        bool on_line_rl = false;
+        ReadLineSensorStateAll(on_line_fl, on_line_fr, on_line_rr, on_line_rl);
 
-        if (on_line_fl && !on_line_fr)
+        if (UsesFourLineSensors)
         {
+            // In 4-sensor mode each corner sensor controls its matching wheel.
+            const double fl_scale = on_line_fl ? kTrackedSideSpeedPercentage : 1.0;
+            const double fr_scale = on_line_fr ? kTrackedSideSpeedPercentage : 1.0;
+            const double rl_scale = on_line_rl ? kTrackedSideSpeedPercentage : 1.0;
+            const double rr_scale = on_line_rr ? kTrackedSideSpeedPercentage : 1.0;
+
+            mav(AllMotorPorts[0], static_cast<int>(drive_speed * PerformanceMultipliers[0] *
+                                                   fl_scale));
+            mav(AllMotorPorts[1], static_cast<int>(drive_speed * PerformanceMultipliers[1] *
+                                                   fr_scale));
+            mav(AllMotorPorts[2], static_cast<int>(drive_speed * PerformanceMultipliers[2] *
+                                                   rl_scale));
+            mav(AllMotorPorts[3], static_cast<int>(drive_speed * PerformanceMultipliers[3] *
+                                                   rr_scale));
+        }
+        else if (on_line_fl && !on_line_fr)
+        {
+            // Legacy 2-sensor correction slows the left-side wheel pair.
             mav(AllMotorPorts[0], static_cast<int>(drive_speed * PerformanceMultipliers[0] *
                                                    kTrackedSideSpeedPercentage));
             mav(AllMotorPorts[1], static_cast<int>(drive_speed * PerformanceMultipliers[1]));
@@ -409,12 +442,18 @@ void Drivetrain::MoveDriveTicksLineTracking(int ticks, int speed)
         }
         else if (!on_line_fl && on_line_fr)
         {
+            // Legacy 2-sensor correction slows the right-side wheel pair.
             mav(AllMotorPorts[0], static_cast<int>(drive_speed * PerformanceMultipliers[0]));
             mav(AllMotorPorts[1], static_cast<int>(drive_speed * PerformanceMultipliers[1] *
                                                    kTrackedSideSpeedPercentage));
             mav(AllMotorPorts[2], static_cast<int>(drive_speed * PerformanceMultipliers[2]));
             mav(AllMotorPorts[3], static_cast<int>(drive_speed * PerformanceMultipliers[3] *
                                                    kTrackedSideSpeedPercentage));
+        }
+        else
+        {
+            // No line pressure detected, continue straight at target speed.
+            SetAllMotorVelocitiesScaled(drive_speed);
         }
 
         msleep(kControlLoopDelayMs);
@@ -432,6 +471,7 @@ void Drivetrain::MoveDriveUntilLine(int speed)
     }
 
     LogCommand("MoveDriveUntilLine", speed);
+    // Reuses stepped intersection logic so behavior matches strafe-to-line flow.
     StepUntilLineIntersections(-speed, kDriveToLineStepTicks,
                                /*use_strafe_motion=*/false);
 }
@@ -440,6 +480,7 @@ void Drivetrain::MoveStrafeTicks(int ticks, int speed)
 {
     LogCommand("MoveStrafeTicks", ticks, speed);
 
+    // Open-loop strafe uses diagonal wheel pairs in opposite directions.
     ResetMotorPositionCounters();
     const int target_ticks = std::abs(ticks);
     const int strafe_speed = -speed;
@@ -467,6 +508,7 @@ void Drivetrain::MoveStrafeTicksLineTracking(int ticks, int speed)
 
     LogCommand("MoveStrafeTicksLineTracking", ticks, speed);
 
+    // Strafe and continuously scale wheel effort from live sensor state.
     ResetMotorPositionCounters();
     const int target_ticks = std::abs(ticks);
     const int strafe_speed = -speed;
@@ -475,20 +517,32 @@ void Drivetrain::MoveStrafeTicksLineTracking(int ticks, int speed)
     {
         bool on_line_fl = false;
         bool on_line_fr = false;
-        ReadLineSensorState(on_line_fl, on_line_fr);
+        bool on_line_rr = false;
+        bool on_line_rl = false;
+        ReadLineSensorStateAll(on_line_fl, on_line_fr, on_line_rr, on_line_rl);
 
         double fl_scale = 1.0;
         double fr_scale = 1.0;
         double rl_scale = 1.0;
         double rr_scale = 1.0;
 
-        if (on_line_fl && !on_line_fr)
+        if (UsesFourLineSensors)
         {
+            // In 4-sensor mode each corner sensor independently dampens its wheel.
+            fl_scale = on_line_fl ? kTrackedSideSpeedPercentage : 1.0;
+            fr_scale = on_line_fr ? kTrackedSideSpeedPercentage : 1.0;
+            rl_scale = on_line_rl ? kTrackedSideSpeedPercentage : 1.0;
+            rr_scale = on_line_rr ? kTrackedSideSpeedPercentage : 1.0;
+        }
+        else if (on_line_fl && !on_line_fr)
+        {
+            // Legacy 2-sensor strafe correction on left side.
             fl_scale = kTrackedSideSpeedPercentage;
             rl_scale = kTrackedSideSpeedPercentage;
         }
         else if (!on_line_fl && on_line_fr)
         {
+            // Legacy 2-sensor strafe correction on right side.
             fr_scale = kTrackedSideSpeedPercentage;
             rr_scale = kTrackedSideSpeedPercentage;
         }
@@ -517,6 +571,7 @@ void Drivetrain::MoveStrafeUntilLine(int speed)
     }
 
     LogCommand("MoveStrafeUntilLine", speed);
+    // Strafe in short steps and count line intersections across configured sensors.
     StepUntilLineIntersections(speed, kStrafeToLineStepTicks,
                                /*use_strafe_motion=*/true);
 }
@@ -530,16 +585,24 @@ void Drivetrain::MoveStrafeUntilBothSensorsSeeLine(int speed)
 
     LogCommand("MoveStrafeUntilBothSensorsSeeLine", speed);
 
+    // Historical function name is preserved, but in 4-sensor mode this waits
+    // until all four configured sensors have observed the line at least once.
     bool fl_seen_black = false;
     bool fr_seen_black = false;
+    bool rr_seen_black = false;
+    bool rl_seen_black = false;
 
     while (true)
     {
+        // Move in fixed increments so we can sample and accumulate line hits.
         MoveStrafeTicks(kStrafeToLineStepTicks, speed);
 
         bool on_line_fl = false;
         bool on_line_fr = false;
-        ReadLineSensorState(on_line_fl, on_line_fr);
+        bool on_line_rr = false;
+        bool on_line_rl = false;
+        ReadLineSensorStateAll(on_line_fl, on_line_fr, on_line_rr,
+                               on_line_rl);
 
         if (on_line_fl)
         {
@@ -549,7 +612,24 @@ void Drivetrain::MoveStrafeUntilBothSensorsSeeLine(int speed)
         {
             fr_seen_black = true;
         }
-        if (fl_seen_black && fr_seen_black)
+
+        if (UsesFourLineSensors)
+        {
+            if (on_line_rr)
+            {
+                rr_seen_black = true;
+            }
+            if (on_line_rl)
+            {
+                rl_seen_black = true;
+            }
+            if (fl_seen_black && fr_seen_black && rr_seen_black &&
+                rl_seen_black)
+            {
+                break;
+            }
+        }
+        else if (fl_seen_black && fr_seen_black)
         {
             break;
         }
@@ -631,6 +711,7 @@ void Drivetrain::MoveSquareWithLine(int speed)
 
     LogCommand("MoveSquareWithLine", speed);
 
+    // Square by driving correction until both left and right sides are on line.
     bool on_line_fl = false;
     bool on_line_fr = false;
     ReadLineSensorState(on_line_fl, on_line_fr);
@@ -654,6 +735,7 @@ void Drivetrain::MoveCenterOnLine(int speed)
 
     LogCommand("MoveCenterOnLine", speed);
 
+    // Center by correcting until both sides clear line according to current mode.
     bool on_line_fl = false;
     bool on_line_fr = false;
     ReadLineSensorState(on_line_fl, on_line_fr);
@@ -718,6 +800,7 @@ bool Drivetrain::EnsureLineTrackingConfigured(const char *operation) const
 
 void Drivetrain::RefreshPerformanceMultipliers()
 {
+    // Keep hot-loop lookup in a compact FL, FR, RL, RR array.
     PerformanceMultipliers[0] = FrontLeftPerformance;
     PerformanceMultipliers[1] = FrontRightPerformance;
     PerformanceMultipliers[2] = RearLeftPerformance;
@@ -726,37 +809,48 @@ void Drivetrain::RefreshPerformanceMultipliers()
 
 void Drivetrain::ReadLineSensorState(bool &on_line_fl, bool &on_line_fr) const
 {
+    // Compatibility helper for algorithms that operate on left/right side state.
     ReadLineSensorStateBySide(on_line_fl, on_line_fr);
+}
+
+void Drivetrain::ReadLineSensorStateAll(bool &on_line_fl, bool &on_line_fr,
+                                        bool &on_line_rr,
+                                        bool &on_line_rl) const
+{
+    if (!IsLineTrackingConfigured())
+    {
+        on_line_fl = false;
+        on_line_fr = false;
+        on_line_rr = false;
+        on_line_rl = false;
+        return;
+    }
+
+    // Always read front sensors in both 2-sensor and 4-sensor modes.
+    on_line_fl = analog(FrontLeftLineSensorPort) > FrontLeftThreshold;
+    on_line_fr = analog(FrontRightLineSensorPort) > FrontRightThreshold;
+
+    if (!UsesFourLineSensors)
+    {
+        on_line_rr = false;
+        on_line_rl = false;
+        return;
+    }
+
+    // Rear sensors are only active in 4-sensor mode.
+    on_line_rr = analog(RearRightLineSensorPort) > RearRightThreshold;
+    on_line_rl = analog(RearLeftLineSensorPort) > RearLeftThreshold;
 }
 
 void Drivetrain::ReadLineSensorStateBySide(bool &on_line_left,
                                            bool &on_line_right) const
 {
-    if (!IsLineTrackingConfigured())
-    {
-        on_line_left = false;
-        on_line_right = false;
-        return;
-    }
-
-    const int fl_reading = analog(FrontLeftLineSensorPort);
-    const int fr_reading = analog(FrontRightLineSensorPort);
-
-    const bool on_line_fl = fl_reading > FrontLeftThreshold;
-    const bool on_line_fr = fr_reading > FrontRightThreshold;
-
-    if (!UsesFourLineSensors)
-    {
-        on_line_left = on_line_fl;
-        on_line_right = on_line_fr;
-        return;
-    }
-
-    const int rr_reading = analog(RearRightLineSensorPort);
-    const int rl_reading = analog(RearLeftLineSensorPort);
-
-    const bool on_line_rr = rr_reading > RearRightThreshold;
-    const bool on_line_rl = rl_reading > RearLeftThreshold;
+    // Side aggregation keeps old correction logic valid in both modes.
+    bool on_line_fl = false;
+    bool on_line_fr = false;
+    bool on_line_rr = false;
+    bool on_line_rl = false;
+    ReadLineSensorStateAll(on_line_fl, on_line_fr, on_line_rr, on_line_rl);
 
     on_line_left = on_line_fl || on_line_rl;
     on_line_right = on_line_fr || on_line_rr;
@@ -764,6 +858,7 @@ void Drivetrain::ReadLineSensorStateBySide(bool &on_line_left,
 
 void Drivetrain::SetAllMotorVelocitiesScaled(int speed)
 {
+    // Utility for uniform drivetrain commands with performance compensation.
     for (int i = 0; i < kMotorCount; ++i)
     {
         mav(AllMotorPorts[i], static_cast<int>(speed * PerformanceMultipliers[i]));
@@ -773,6 +868,7 @@ void Drivetrain::SetAllMotorVelocitiesScaled(int speed)
 void Drivetrain::SetMotorPairVelocityRaw(const std::array<int, 2> &motors,
                                          int speed)
 {
+    // Raw pair writes are used by legacy correction logic that pivots a side.
     for (int motor : motors)
     {
         mav(motor, speed);

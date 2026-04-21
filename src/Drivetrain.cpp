@@ -2,7 +2,7 @@
 // Created by Connor Denihan on 2/19/26.
 //
 
-#include "../include/Drivetrain.hpp"
+#include "../include/Wombat-CC/Drivetrain.hpp"
 #include <array>
 #include <cmath>
 #include <cstdlib>

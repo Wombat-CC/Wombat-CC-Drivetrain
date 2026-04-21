@@ -21,7 +21,7 @@ Use this dependency key in your consumer `build.zig.zon`:
 Then include the header:
 
 ```cpp
-#include <Drivetrain.hpp>
+#include <Wombat-CC/Drivetrain.hpp>
 ```
 
 ## Motor Layout And Constructor
@@ -47,7 +47,7 @@ Port meaning:
 ## Quick Start
 
 ```cpp
-#include <Drivetrain.hpp>
+#include <Wombat-CC/Drivetrain.hpp>
 
 int main()
 {

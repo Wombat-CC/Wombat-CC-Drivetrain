@@ -13,13 +13,29 @@
 namespace
 {
     constexpr int kMotorCount = 4;
+    constexpr int kTwoSensorCount = 2;
+    constexpr int kFourSensorCount = 4;
+    constexpr int kUnconfiguredSensorPort = -1;
+    constexpr int kDisabledThreshold = 0;
+    constexpr int kDisabledCalibrationReading = 0;
     constexpr int kControlLoopDelayMs = 10;
     constexpr int kLineIntersectionsRequired = 3;
     constexpr int kDriveToLineStepTicks = 3;
     constexpr int kStrafeToLineStepTicks = 10;
     constexpr double kTrackedSideSpeedPercentage = 0.75;
+    constexpr double kDefaultPerformanceMultiplier = 1.00;
 
-    bool IsTruthyDebugValue(const char *value)
+    constexpr int ComputeLineThreshold(int white_reading, int black_reading)
+    {
+        return (white_reading + black_reading) / 2;
+    }
+
+    constexpr int ScaleMotorSpeed(int speed, double multiplier)
+    {
+        return static_cast<int>(speed * multiplier);
+    }
+
+    constexpr bool IsTruthyDebugValue(const char *value)
     {
         if (value == nullptr)
         {
@@ -204,18 +220,31 @@ Drivetrain::Drivetrain(int front_left_motor_port, int front_right_motor_port,
       FrontRightRearLeftMotors{front_right_motor_port, rear_left_motor_port},
       LeftSideMotors{front_left_motor_port, rear_left_motor_port},
       RightSideMotors{front_right_motor_port, rear_right_motor_port},
-      FrontLeftPerformance(1.00), FrontRightPerformance(1.00),
-      RearLeftPerformance(1.00), RearRightPerformance(1.00),
-      PerformanceMultipliers{1.00, 1.00, 1.00, 1.00},
-      FrontLeftLineSensorPort(-1),
-      FrontRightLineSensorPort(-1),
-      RearRightLineSensorPort(-1), RearLeftLineSensorPort(-1),
-      FrontLeftThreshold(0), FrontRightThreshold(0),
-      RearRightThreshold(0), RearLeftThreshold(0), FrontLeftWhiteReading(0),
-      FrontRightWhiteReading(0), RearRightWhiteReading(0),
-      RearLeftWhiteReading(0), FrontLeftBlackReading(0),
-      FrontRightBlackReading(0), RearRightBlackReading(0),
-      RearLeftBlackReading(0), UsesFourLineSensors(false),
+      FrontLeftPerformance(kDefaultPerformanceMultiplier),
+      FrontRightPerformance(kDefaultPerformanceMultiplier),
+      RearLeftPerformance(kDefaultPerformanceMultiplier),
+      RearRightPerformance(kDefaultPerformanceMultiplier),
+      PerformanceMultipliers{kDefaultPerformanceMultiplier,
+                             kDefaultPerformanceMultiplier,
+                             kDefaultPerformanceMultiplier,
+                             kDefaultPerformanceMultiplier},
+      FrontLeftLineSensorPort(kUnconfiguredSensorPort),
+      FrontRightLineSensorPort(kUnconfiguredSensorPort),
+      RearRightLineSensorPort(kUnconfiguredSensorPort),
+      RearLeftLineSensorPort(kUnconfiguredSensorPort),
+      FrontLeftThreshold(kDisabledThreshold),
+      FrontRightThreshold(kDisabledThreshold),
+      RearRightThreshold(kDisabledThreshold),
+      RearLeftThreshold(kDisabledThreshold),
+      FrontLeftWhiteReading(kDisabledCalibrationReading),
+      FrontRightWhiteReading(kDisabledCalibrationReading),
+      RearRightWhiteReading(kDisabledCalibrationReading),
+      RearLeftWhiteReading(kDisabledCalibrationReading),
+      FrontLeftBlackReading(kDisabledCalibrationReading),
+      FrontRightBlackReading(kDisabledCalibrationReading),
+      RearRightBlackReading(kDisabledCalibrationReading),
+      RearLeftBlackReading(kDisabledCalibrationReading),
+      UsesFourLineSensors(false),
       ConfiguredLineSensorCount(0), ThresholdLineSensorCount(0),
       LineSensorsConfigured(false), LineTrackingThresholdsConfigured(false),
       DebugEnabled(IsDebugEnabledFromEnvironment()),
@@ -237,10 +266,10 @@ void Drivetrain::ConfigureLineTrackingSensors(int front_left_line_sensor_port,
 {
     FrontLeftLineSensorPort = front_left_line_sensor_port;
     FrontRightLineSensorPort = front_right_line_sensor_port;
-    RearRightLineSensorPort = -1;
-    RearLeftLineSensorPort = -1;
+    RearRightLineSensorPort = kUnconfiguredSensorPort;
+    RearLeftLineSensorPort = kUnconfiguredSensorPort;
     UsesFourLineSensors = false;
-    ConfiguredLineSensorCount = 2;
+    ConfiguredLineSensorCount = kTwoSensorCount;
     LineSensorsConfigured = true;
 
     if (DebugEnabled)
@@ -261,7 +290,7 @@ void Drivetrain::ConfigureLineTrackingSensors(int front_left_line_sensor_port,
     RearRightLineSensorPort = rear_right_line_sensor_port;
     RearLeftLineSensorPort = rear_left_line_sensor_port;
     UsesFourLineSensors = true;
-    ConfiguredLineSensorCount = 4;
+    ConfiguredLineSensorCount = kFourSensorCount;
     LineSensorsConfigured = true;
 
     if (DebugEnabled)
@@ -299,16 +328,18 @@ void Drivetrain::SetLineTrackingThresholds(int front_left_white,
     FrontRightWhiteReading = front_right_white;
     FrontLeftBlackReading = front_left_black;
     FrontRightBlackReading = front_right_black;
-    RearRightWhiteReading = 0;
-    RearLeftWhiteReading = 0;
-    RearRightBlackReading = 0;
-    RearLeftBlackReading = 0;
+    RearRightWhiteReading = kDisabledCalibrationReading;
+    RearLeftWhiteReading = kDisabledCalibrationReading;
+    RearRightBlackReading = kDisabledCalibrationReading;
+    RearLeftBlackReading = kDisabledCalibrationReading;
 
-    FrontLeftThreshold = (front_left_white + front_left_black) / 2;
-    FrontRightThreshold = (front_right_white + front_right_black) / 2;
-    RearRightThreshold = 0;
-    RearLeftThreshold = 0;
-    ThresholdLineSensorCount = 2;
+    FrontLeftThreshold = ComputeLineThreshold(front_left_white,
+                                              front_left_black);
+    FrontRightThreshold = ComputeLineThreshold(front_right_white,
+                                               front_right_black);
+    RearRightThreshold = kDisabledThreshold;
+    RearLeftThreshold = kDisabledThreshold;
+    ThresholdLineSensorCount = kTwoSensorCount;
     LineTrackingThresholdsConfigured = true;
 
     if (DebugEnabled)
@@ -338,11 +369,15 @@ void Drivetrain::SetLineTrackingThresholds(int front_left_white,
     RearRightBlackReading = rear_right_black;
     RearLeftBlackReading = rear_left_black;
 
-    FrontLeftThreshold = (front_left_white + front_left_black) / 2;
-    FrontRightThreshold = (front_right_white + front_right_black) / 2;
-    RearRightThreshold = (rear_right_white + rear_right_black) / 2;
-    RearLeftThreshold = (rear_left_white + rear_left_black) / 2;
-    ThresholdLineSensorCount = 4;
+    FrontLeftThreshold = ComputeLineThreshold(front_left_white,
+                                              front_left_black);
+    FrontRightThreshold = ComputeLineThreshold(front_right_white,
+                                               front_right_black);
+    RearRightThreshold = ComputeLineThreshold(rear_right_white,
+                                              rear_right_black);
+    RearLeftThreshold = ComputeLineThreshold(rear_left_white,
+                                             rear_left_black);
+    ThresholdLineSensorCount = kFourSensorCount;
     LineTrackingThresholdsConfigured = true;
 
     if (DebugEnabled)
@@ -861,7 +896,7 @@ void Drivetrain::SetAllMotorVelocitiesScaled(int speed)
     // Utility for uniform drivetrain commands with performance compensation.
     for (int i = 0; i < kMotorCount; ++i)
     {
-        mav(AllMotorPorts[i], static_cast<int>(speed * PerformanceMultipliers[i]));
+        mav(AllMotorPorts[i], ScaleMotorSpeed(speed, PerformanceMultipliers[i]));
     }
 }
 
